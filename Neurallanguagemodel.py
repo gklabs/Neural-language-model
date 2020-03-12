@@ -20,7 +20,9 @@ python3 Neurallanguagemodel.py /Users/gkbytes/nlm/tweet/train /Users/gkbytes/nlm
 
 3. bi-gram representation function for train and test
 	2 negative sample for each positive sample
-	for negative sample, randomly pick a word other than the word in the positive sample.
+	for negative sample, 
+		create the vocabulary of training sample
+		randomly pick a word other than the word in the positive sample.
 
 4. Feed forward Neural Network
 	2 Hidden Layers of size 20
@@ -54,6 +56,7 @@ from sklearn.model_selection import train_test_split
 #pytorch related imports
 import torch.nn as nn
 import torch.optim as optim
+import random
 
 
 def get_data(path):
@@ -192,18 +195,42 @@ def clean(df):
 
 #returns a list containing bigrams
 def pos_sample_bigrammer(df):
+	bigram_list=[]
 	for input_list in df.text:
-
-		bigram_list=[]
 
 		for i in range(len(input_list)-1):
 			bigram_list.append((input_list[i], input_list[i+1]))
-		print(bigram_list)
+		#print(bigram_list)
 	return bigram_list
 
-# returns a list that returns k negative sample bigrams for a given positive bigram from a dataset
-def neg_sample_bigrammer(df):
 
+#creating vocabulary
+def createvocab(df):
+    V=[]
+    for tweet in df.text:
+        for keyword in tweet:
+            if keyword  in V:
+                continue
+            else :
+                V.append(keyword)
+    return V
+
+
+# returns a list that returns k negative sample bigrams for a list of given positive bigrams
+def neg_sample_bigrammer(bigramlist,vocab,k):
+	end= len(vocab)
+	negsample=[]
+	for posbigram in bigramlist:
+		word=str(posbigram[1])
+		if word in vocab:
+			num= vocab.index(word)
+			neglist= random.sample([i for i in range(0,end) if i not in [num]],k)
+			for j in neglist:
+				negsample.append((posbigram[0],vocab[j]))
+	return negsample
+
+def NeuralNetwork():
+	
 
 def main():
 
@@ -215,16 +242,50 @@ def main():
     clean_train_stem,clean_train_nostem= clean(train)
     clean_test_stem, clean_test_nostem= clean(test)
     print("cleaning done")
-    print(clean_train_stem.head(5))
-    print(clean_train_nostem.head(5))
+    
+
+    print("creating the vocabulary for stemmed and unstemmed data")
+    Vocab_stem = createvocab(clean_train_stem)
+    Vocab_nostem = createvocab(clean_train_nostem)
+    print("vocabulary created")
+    print("Stemmed vocabulary length=",len(Vocab_stem))
+    print("No stem vocabulary length=",len(Vocab_nostem))
 
     print("creating positive bigrams")
     train_stem_pos_bigram= pos_sample_bigrammer(clean_train_stem)
     train_nostem_pos_bigram= pos_sample_bigrammer(clean_train_nostem)
     print("positive samples for training created")
+    print("No of no stem pos bigrams=", len(train_nostem_pos_bigram))
+    print("No of stem pos bigrams=" ,len(train_stem_pos_bigram))
 
     print("creating negative sample bigrams")
-    neg_sample_bigrammer()
+    train_stem_neg_bigram = neg_sample_bigrammer(train_stem_pos_bigram, Vocab_stem,2)
+    train_nostem_neg_bigram = neg_sample_bigrammer(train_nostem_pos_bigram, Vocab_nostem,2)
+    print("negative samples created")
+    
+    print("No of no stem neg bigrams=", len(train_nostem_neg_bigram))
+    print("No of stem neg bigrams=" ,len(train_stem_neg_bigram))
+
+    #create a training dataframe with positive and negative samples and adding 1,0  for them
+    train_stem_data=pd.DataFrame()
+    train_nostem_data=pd.DataFrame()
+
+    train_stem_data['bigram'] = train_stem_pos_bigram + train_stem_neg_bigram
+    train_nostem_data['bigram']= train_nostem_pos_bigram + train_nostem_neg_bigram
+    
+    y_nostem =[0]*len(train_nostem_pos_bigram) + [1]*len(train_nostem_neg_bigram)
+    y_stem= [0]*len(train_stem_pos_bigram)+ [1]*len(train_stem_neg_bigram)
+
+    train_stem_data['labels'] = y_stem
+    train_nostem_data['labels'] = y_nostem
+
+    print("train data is ready for stem and no stem ")
+
+
+
+    #create a neural language model
+
+
 
 
 if __name__ == "__main__":
