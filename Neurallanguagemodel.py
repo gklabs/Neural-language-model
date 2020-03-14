@@ -23,12 +23,20 @@ python3 Neurallanguagemodel.py /Users/gkbytes/nlm/tweet/train /Users/gkbytes/nlm
 	for negative sample, 
 		create the vocabulary of training sample
 		randomly pick a word other than the word in the positive sample.
-
-4. Feed forward Neural Network
-	2 Hidden Layers of size 20
+4. Create Language Model
+	Embedding vector
+	One hot encoding of every word in the vocabulary using sklearn
+	Initialize Embedding vector of dimensions (d,|V|). We assume d=10 with random numbers
+	Feed forward Neural Network 2 Hidden Layers of size 20
 	initialize weights with random numbers
 	LR= 0.00001/ tune
-5. Predict and print accuracy in test
+
+5. Predict and print accuracy for positive tweets in test
+
+
+
+References:
+https://pytorch.org/tutorials/beginner/nlp/word_embeddings_tutorial.html
 
 '''
 
@@ -53,11 +61,16 @@ from sklearn.metrics import accuracy_score
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-#pytorch related imports
-import torch.nn as nn
-import torch.optim as optim
+from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import OneHotEncoder
 import random
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import time
 
+start_time = time.time()
 
 def get_data(path):
     pospath = path + '/positive'
@@ -193,15 +206,26 @@ def clean(df):
     
     return df_stemmed,df_unstemmed
 
+
+def allwordsinorder(df):
+	allwords= []
+	for text in df.text:
+		for word in text:
+			allwords.append(word)
+	return allwords
+
 #returns a list containing bigrams
 def pos_sample_bigrammer(df):
-	bigram_list=[]
-	for input_list in df.text:
-
-		for i in range(len(input_list)-1):
-			bigram_list.append((input_list[i], input_list[i+1]))
+	wordsinorder= allwordsinorder(df)
+	print("words in order len",len(wordsinorder))
+	bigrams=[]
+	bigramlist=[]
+	for i in range(len(wordsinorder)-1):
+		bigram_list=[wordsinorder[i], wordsinorder[i + 1]]
 		#print(bigram_list)
-	return bigram_list
+		bigrams.append(bigram_list)
+	#print(bigrams)
+	return bigrams
 
 
 #creating vocabulary
@@ -216,21 +240,84 @@ def createvocab(df):
     return V
 
 
-# returns a list that returns k negative sample bigrams for a list of given positive bigrams
+# returns a list that contains k negative sample bigrams for every given positive bigram
 def neg_sample_bigrammer(bigramlist,vocab,k):
 	end= len(vocab)
 	negsample=[]
+	negbigsample= []
+	print(bigramlist[1])
 	for posbigram in bigramlist:
 		word=str(posbigram[1])
 		if word in vocab:
 			num= vocab.index(word)
 			neglist= random.sample([i for i in range(0,end) if i not in [num]],k)
 			for j in neglist:
-				negsample.append((posbigram[0],vocab[j]))
-	return negsample
+				negsample= [posbigram[0][0],vocab[j]]
+				negbigsample.append(negsample)
+	print(len(negbigsample))
+	return negbigsample
 
-def NeuralNetwork():
-	
+
+def Languagemodel(bigrams_data,vocab2,d):
+	bigram= bigrams_data
+	print(bigram[1])
+	vocab = set(vocab2)
+	word_to_ix = {word: i for i, word in enumerate(vocab)}
+
+	class NGramLanguageModeler(nn.Module):
+
+	    def __init__(self, vocab_size, embedding_dim, context_size):
+	        super(NGramLanguageModeler, self).__init__()
+	        self.embeddings = nn.Embedding(vocab_size, embedding_dim)
+	        self.linear1 = nn.Linear(context_size * embedding_dim, 20)
+	        self.linear2 = nn.Linear(20, vocab_size)
+
+	    def forward(self, inputs):
+	        embeds = self.embeddings(inputs).view((1, -1))
+	        out = F.sigmoid(self.linear1(embeds))
+	        out = self.linear2(out)
+	        log_probs = F.log_softmax(out, dim=1)
+	        return log_probs
+
+	losses = []
+	loss_function = nn.NLLLoss()
+	model = NGramLanguageModeler(len(vocab), d, 1)
+	optimizer = optim.SGD(model.parameters(), lr=0.001)
+
+	for epoch in range(10):
+	    total_loss = 0
+	    for context, target in bigram:
+
+	        # Step 1. Prepare the inputs to be passed to the model (i.e, turn the words
+	        # into integer indices and wrap them in tensors)
+	        print(context)
+	        print(target)
+	        context_idxs = torch.tensor([word_to_ix[w] for w in context], dtype=torch.long)
+	        print(context_idxs)
+
+	        # Step 2. Recall that torch *accumulates* gradients. Before passing in a
+	        # new instance, you need to zero out the gradients from the old instance
+	        #model.zero_grad()
+
+	        # Step 3. Run the forward pass, getting log probabilities over next words
+	        log_probs = model(context_idxs)
+
+	        # Step 4. Compute your loss function. (Again, Torch wants the target
+	        # word wrapped in a tensor)
+	        loss = loss_function(log_probs, torch.tensor([word_to_ix[target]], dtype=torch.long))
+
+	        # Step 5. Do the backward pass and update the gradient
+	        loss.backward()
+	        optimizer.step()
+
+	        # Get the Python number from a 1-element Tensor by calling tensor.item()
+	        total_loss += loss.item()
+	    losses.append(total_loss)
+	    print(losses)
+
+
+
+
 
 def main():
 
@@ -252,38 +339,37 @@ def main():
     print("No stem vocabulary length=",len(Vocab_nostem))
 
     print("creating positive bigrams")
+    
     train_stem_pos_bigram= pos_sample_bigrammer(clean_train_stem)
     train_nostem_pos_bigram= pos_sample_bigrammer(clean_train_nostem)
+    
     print("positive samples for training created")
     print("No of no stem pos bigrams=", len(train_nostem_pos_bigram))
     print("No of stem pos bigrams=" ,len(train_stem_pos_bigram))
 
     print("creating negative sample bigrams")
     train_stem_neg_bigram = neg_sample_bigrammer(train_stem_pos_bigram, Vocab_stem,2)
-    train_nostem_neg_bigram = neg_sample_bigrammer(train_nostem_pos_bigram, Vocab_nostem,2)
+    #train_nostem_neg_bigram = neg_sample_bigrammer(train_nostem_pos_bigram, Vocab_nostem,2)
     print("negative samples created")
     
-    print("No of no stem neg bigrams=", len(train_nostem_neg_bigram))
+    #print("No of no stem neg bigrams=", len(train_nostem_neg_bigram))
     print("No of stem neg bigrams=" ,len(train_stem_neg_bigram))
 
     #create a training dataframe with positive and negative samples and adding 1,0  for them
-    train_stem_data=pd.DataFrame()
-    train_nostem_data=pd.DataFrame()
 
-    train_stem_data['bigram'] = train_stem_pos_bigram + train_stem_neg_bigram
-    train_nostem_data['bigram']= train_nostem_pos_bigram + train_nostem_neg_bigram
+    train_stem_data = train_stem_pos_bigram + train_stem_neg_bigram
+    #train_nostem_data= train_nostem_pos_bigram + train_nostem_neg_bigram
     
-    y_nostem =[0]*len(train_nostem_pos_bigram) + [1]*len(train_nostem_neg_bigram)
+    #y_nostem =[0]*len(train_nostem_pos_bigram) + [1]*len(train_nostem_neg_bigram)
     y_stem= [0]*len(train_stem_pos_bigram)+ [1]*len(train_stem_neg_bigram)
 
-    train_stem_data['labels'] = y_stem
-    train_nostem_data['labels'] = y_nostem
-
+    print("--- %s seconds ---" %(time.time() - start_time))
     print("train data is ready for stem and no stem ")
 
+    print("Creating Language model")
+    Languagemodel(train_stem_data, Vocab_stem, 10)
+    Languagemodel(train_nostem_data, Vocab_stem, 10)
 
-
-    #create a neural language model
 
 
 
